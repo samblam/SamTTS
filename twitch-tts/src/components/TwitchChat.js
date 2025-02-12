@@ -17,6 +17,7 @@ const TwitchChat = () => {
   const [selectedVoice, setSelectedVoice] = useState(null);
   const [speechRate, setSpeechRate] = useState(DEFAULT_RATE);
   const [isTTSEnabled, setIsTTSEnabled] = useState(true);
+  const [messageQueue, setMessageQueue] = useState([]);
   const speechSynthesis = useRef(window.speechSynthesis);
 
   // Initialize TTS and load available voices
@@ -45,13 +46,12 @@ const TwitchChat = () => {
     if (!isTTSEnabled || !selectedVoice) return;
 
     // Cancel any ongoing speech
-    speechSynthesis.current.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.voice = selectedVoice;
     utterance.rate = speechRate;
-    speechSynthesis.current.speak(utterance);
-  }, [selectedVoice, speechRate, isTTSEnabled]);
+    setMessageQueue(prevQueue => [...prevQueue, text]);
+  }, [selectedVoice, speechRate, isTTSEnabled, setMessageQueue]);
 
   const connect = useCallback(async () => {
     try {
@@ -120,10 +120,7 @@ const TwitchChat = () => {
       setMessages(prev => [...prev, newMessage]);
       console.log(`${tags.username}: ${message}`);
       
-      // Only speak if TTS is enabled
-      if (isTTSEnabled) {
-        speak(`${tags.username} says: ${message}`);
-      }
+      speak(`${tags.username} says: ${message}`);
     };
 
     const handleDisconnect = (error) => {
@@ -144,6 +141,27 @@ const TwitchChat = () => {
       client.removeListener('disconnected', handleDisconnect);
     };
   }, [client, connect, retryCount, isTTSEnabled, speak]);
+
+  // Process message queue
+  useEffect(() => {
+    const processQueue = () => {
+      if (messageQueue.length > 0 && !speechSynthesis.current.speaking) {
+        const message = messageQueue[0];
+        setMessageQueue(prevQueue => prevQueue.shift());
+
+        const utterance = new SpeechSynthesisUtterance(message);
+        utterance.voice = selectedVoice;
+        utterance.rate = speechRate;
+        speechSynthesis.current.speak(utterance);
+
+        utterance.onend = () => {
+          setTimeout(processQueue, 1000); // 1-second pause
+        };
+      }
+    };
+
+    processQueue();
+  }, [messageQueue, selectedVoice, speechRate]);
 
   const reconnect = () => {
     setRetryCount(0);
@@ -213,6 +231,14 @@ const TwitchChat = () => {
             <span className="content">{msg.message}</span>
           </div>
         ))}
+      </div>
+      <div className="queue">
+        <h3>Message Queue</h3>
+        <ul>
+          {messageQueue.map((message, index) => (
+            <li key={index}>{message}</li>
+          ))}
+        </ul>
       </div>
     </div>
   );

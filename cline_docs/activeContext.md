@@ -16,17 +16,16 @@
 - Fixed TTS enable/disable toggle functionality
 
 ## Next Steps
-1. Implement TTS functionality
-   - Research and select appropriate TTS library
-   - Create TTS service layer
-   - Integrate TTS with chat messages
-2. Add user settings
+1. Add user settings
    - Voice selection
    - Speech rate control
    - Volume control
-3. Add message filtering options
-4. Implement TTS queue management
-5. Add test coverage for critical functionality
+2. Add message filtering options
+3. Add test coverage for critical functionality
+
+## Completed Tasks
+- Implemented TTS queue management to prevent message cut-offs
+- Added UI element to display the message queue
 
 ## Status
-Successfully implemented Twitch chat integration with robust error handling and reconnection logic. The chat interface is now functional and properly styled. Moving forward with TTS integration.
+Successfully implemented Twitch chat integration with robust error handling and reconnection logic. The chat interface is now functional and properly styled. TTS queue management implemented. Moving forward with user settings.
