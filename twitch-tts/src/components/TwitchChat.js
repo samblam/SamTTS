@@ -18,7 +18,9 @@ const TwitchChat = () => {
   const [speechRate, setSpeechRate] = useState(DEFAULT_RATE);
   const [isTTSEnabled, setIsTTSEnabled] = useState(true);
   const [messageQueue, setMessageQueue] = useState([]);
+  const [isProcessing, setIsProcessing] = useState(false);
   const speechSynthesis = useRef(window.speechSynthesis);
+  const processQueueRef = useRef(null);
 
   // Initialize TTS and load available voices
   useEffect(() => {
@@ -50,7 +52,8 @@ const TwitchChat = () => {
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.voice = selectedVoice;
     utterance.rate = speechRate;
-    setMessageQueue(prevQueue => [...prevQueue, text]);
+    setMessageQueue(prevQueue => (Array.isArray(prevQueue) ? [...prevQueue, text] : [text]));
+    console.log('speak: added to queue:', text, messageQueue);
   }, [selectedVoice, speechRate, isTTSEnabled, setMessageQueue]);
 
   const connect = useCallback(async () => {
@@ -144,24 +147,37 @@ const TwitchChat = () => {
 
   // Process message queue
   useEffect(() => {
-    const processQueue = () => {
-      if (messageQueue.length > 0 && !speechSynthesis.current.speaking) {
+    processQueueRef.current = () => {
+      console.log('processQueueRef.current called', 'isProcessing:', isProcessing, 'messageQueue:', messageQueue);
+      if (!isProcessing && messageQueue && messageQueue.length > 0) {
+        console.log('processQueueRef.current: processing message:', messageQueue[0]);
+        setIsProcessing(true);
         const message = messageQueue[0];
-        setMessageQueue(prevQueue => prevQueue.shift());
+        setMessageQueue(prevQueue => prevQueue.slice(1));
 
         const utterance = new SpeechSynthesisUtterance(message);
         utterance.voice = selectedVoice;
         utterance.rate = speechRate;
+        utterance.onstart = () => {
+          console.log('utterance.onstart', 'message:', utterance.text);
+          setIsProcessing(true);
+        }
+        console.log('Calling speechSynthesis.current.speak with:', utterance.text);
         speechSynthesis.current.speak(utterance);
 
         utterance.onend = () => {
-          setTimeout(processQueue, 1000); // 1-second pause
+          console.log('utterance.onend', 'message:', utterance.text);
+          setIsProcessing(false);
+          if (messageQueue.length > 0) {
+            processQueueRef.current();
+          }
         };
       }
     };
-
-    processQueue();
-  }, [messageQueue, selectedVoice, speechRate]);
+    if (messageQueue.length > 0) {
+      processQueueRef.current();
+    }
+  }, [messageQueue, selectedVoice, speechRate, isProcessing, messageQueue.length]);
 
   const reconnect = () => {
     setRetryCount(0);
@@ -235,7 +251,7 @@ const TwitchChat = () => {
       <div className="queue">
         <h3>Message Queue</h3>
         <ul>
-          {messageQueue.map((message, index) => (
+          {messageQueue && messageQueue.map((message, index) => (
             <li key={index}>{message}</li>
           ))}
         </ul>
