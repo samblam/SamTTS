@@ -164,38 +164,38 @@ const TwitchChat = () => {
     if (!client) return;
 
     const handleMessage = (channel, tags, message, self) => {
-      const newMessage = {
-        id: tags.id || Date.now().toString(),
-        username: tags.username,
-        message: message,
-        timestamp: new Date(),
-      };
 
-      setMessages(prev => [...prev, newMessage]);
-      console.log(`${tags.username}: ${message}`);
-      
-      const filterMessage = (message) => {
-        let filteredMessage = message;
+      const filterMessage = (msg) => { // Renamed parameter to avoid shadowing
+        let processedMsg = msg;
         // Filter words
         filteredWords.forEach(word => {
-          // Use word boundaries and case-insensitive matching
-          // Need to escape special regex characters in the user-provided word if necessary
-          // For simplicity, assuming words don't contain special regex chars for now
           const regex = new RegExp(`\\b${word}\\b`, 'gi');
-          filteredMessage = filteredMessage.replace(regex, '***'); // Replace with asterisks
+          processedMsg = processedMsg.replace(regex, '***'); // Replace with asterisks
         });
 
         // Basic link detection and replacement
         const urlRegex = /(https?:\/\/[^\s]+)/g;
-        filteredMessage = filteredMessage.replace(urlRegex, '[link removed]');
+        processedMsg = processedMsg.replace(urlRegex, '[link removed]');
 
-        return filteredMessage.trim(); // Trim whitespace potentially left after filtering
+        return processedMsg.trim(); // Trim whitespace potentially left after filtering
       };
 
-      const filteredMessage = filterMessage(message);
+      const filteredMessageContent = filterMessage(message); // Filter the incoming message
+
+      // Create the message object for display using the filtered content
+      const displayMessage = {
+        id: tags.id || Date.now().toString(),
+        username: tags.username,
+        message: filteredMessageContent, // Use filtered content for display
+        timestamp: new Date(),
+      };
+
+      setMessages(prev => [...prev, displayMessage]); // Add the filtered message to the display state
+      console.log(`${tags.username}: ${message}`); // Log the original message for debugging/history
+
       // Only speak if the message is not empty after filtering
-      if (filteredMessage) {
-        speak(`${tags.username} says: ${filteredMessage}`);
+      if (filteredMessageContent) {
+        speak(`${tags.username} says: ${filteredMessageContent}`); // Speak the filtered content
       }
     };
 
@@ -222,8 +222,8 @@ const TwitchChat = () => {
     client.on('disconnected', handleDisconnect);
 
     return () => {
-      client.removeListener('message', handleMessage);
-      client.removeListener('disconnected', handleDisconnect);
+      client && client.removeListener('message', handleMessage);
+      client && client.removeListener('disconnected', handleDisconnect);
     };
   }, [client, connect, retryCount, isTTSEnabled, speak]);
 
