@@ -23,15 +23,20 @@
   - [x] Implement speech rate control
   - [x] Add TTS enable/disable toggle
 
-## Upcoming
+## Completed
+- [x] Implement TTS queue management
+  - [x] Basic queue handling (FIFO)
+  - [x] UI element to display queue
+
+## In Progress
 - [ ] Add message filtering and moderation
+  - [x] Basic word filtering (UI + logic)
+  - [x] Basic link detection/removal
   - [ ] Username filters
-  - [ ] Content filters
+  - [ ] Advanced content filters (regex?)
   - [ ] Rate limiting
-- [ ] Implement TTS queue management
-  - [ ] Message priority system
-  - [ ] Queue size limits
-  - [ ] Skip/clear functionality
+
+## Upcoming
 - [ ] Add user settings interface
   - [ ] TTS configuration
   - [ ] Filter settings

@@ -1,0 +1,18 @@
+# Project Intelligence
+
+## Project Structure
+- React application located in the `twitch-tts/` directory.
+- Documentation maintained in `cline_docs/` directory.
+
+## Technologies Used
+- React (UI Framework)
+- tmi.js (Twitch Chat Integration)
+- Web Speech API (Text-to-Speech)
+
+## Key Implementation Paths
+- Twitch chat integration is implemented in the `TwitchChat.js` component.
+- TTS functionality is integrated using the Web Speech API.
+
+## Notes
+- The project uses Create React App (CRA) for development.
+- The main branch is the primary development branch.

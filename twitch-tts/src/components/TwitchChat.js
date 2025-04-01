@@ -17,6 +17,7 @@ const TwitchChat = () => {
   const [selectedVoice, setSelectedVoice] = useState(null);
   const [speechRate, setSpeechRate] = useState(DEFAULT_RATE);
   const [isTTSEnabled, setIsTTSEnabled] = useState(true);
+  const [filteredWords, setFilteredWords] = useState([]);
   const [messageQueue, setMessageQueue] = useState([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const speechSynthesis = useRef(window.speechSynthesis);
@@ -24,11 +25,21 @@ const TwitchChat = () => {
 
   // Initialize TTS and load available voices
   useEffect(() => {
+    console.log('Initializing TTS system');
+    
     const loadVoices = () => {
       const availableVoices = speechSynthesis.current.getVoices();
+      console.log('Available voices:', availableVoices.map(v => ({
+        name: v.name,
+        lang: v.lang,
+        default: v.default
+      })));
+      
       setVoices(availableVoices);
+      
       // Set default voice (prefer English)
       const defaultVoice = availableVoices.find(voice => voice.lang.startsWith('en-')) || availableVoices[0];
+      console.log('Selected default voice:', defaultVoice?.name);
       setSelectedVoice(defaultVoice);
     };
 
@@ -39,22 +50,43 @@ const TwitchChat = () => {
     loadVoices();
 
     return () => {
-      speechSynthesis.current.cancel(); // Cancel any ongoing speech when unmounting
+      console.log('TTS cleanup: cancelling speech and clearing queue');
+      speechSynthesis.current.cancel(); // Cancel any ongoing speech
+      setMessageQueue([]); // Clear the queue
+      setIsProcessing(false); // Reset processing state
     };
   }, []);
 
-  // Function to speak text
+  // Function to add text to speech queue
   const speak = useCallback((text) => {
-    if (!isTTSEnabled || !selectedVoice) return;
+    console.log('Speak called:', {
+      text,
+      isTTSEnabled,
+      hasVoice: !!selectedVoice,
+      voiceName: selectedVoice?.name
+    });
 
-    // Cancel any ongoing speech
-
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.voice = selectedVoice;
-    utterance.rate = speechRate;
-    setMessageQueue(prevQueue => (Array.isArray(prevQueue) ? [...prevQueue, text] : [text]));
-    console.log('speak: added to queue:', text, messageQueue);
-  }, [selectedVoice, speechRate, isTTSEnabled, setMessageQueue]);
+    if (!isTTSEnabled) {
+      console.log('TTS is disabled, ignoring message');
+      return;
+    }
+    
+    if (!selectedVoice) {
+      console.log('No voice selected, ignoring message');
+      return;
+    }
+    
+    setMessageQueue(prevQueue => {
+      const newQueue = Array.isArray(prevQueue) ? [...prevQueue, text] : [text];
+      console.log('Queue updated:', {
+        addedMessage: text,
+        previousLength: prevQueue.length,
+        newLength: newQueue.length,
+        fullQueue: newQueue
+      });
+      return newQueue;
+    });
+  }, [isTTSEnabled, selectedVoice]);
 
   const connect = useCallback(async () => {
     try {
@@ -62,16 +94,30 @@ const TwitchChat = () => {
         await client.disconnect();
       }
 
+      console.log('Initializing new TMI client');
       const newClient = new tmi.Client({
         connection: {
           reconnect: true,
           secure: true
         },
-        channels: ['greenshoesandsam']
+        channels: ['SamBarefoot'],
+        logger: {
+          info: (message) => console.log('[TMI info]', message),
+          warn: (message) => console.warn('[TMI warn]', message),
+          error: (message) => console.error('[TMI error]', message)
+        }
       });
 
       setConnectionStatus('connecting');
-      await newClient.connect();
+      console.log('Attempting to connect to Twitch...');
+      await newClient.connect().catch(err => {
+        console.error('[TMI connect error]', {
+          name: err.name,
+          message: err.message,
+          stack: err.stack
+        });
+        throw err;
+      });
       
       setClient(newClient);
       setConnectionStatus('connected');
@@ -80,7 +126,12 @@ const TwitchChat = () => {
       
       console.log('Connected to Twitch chat');
     } catch (err) {
-      console.error('Connection error:', err);
+      console.error('Connection error:', {
+        error: err,
+        message: err.message,
+        stack: err.stack,
+        details: err.toString()
+      });
       setError(`Connection failed: ${err.message}`);
       setConnectionStatus('disconnected');
       
@@ -123,15 +174,46 @@ const TwitchChat = () => {
       setMessages(prev => [...prev, newMessage]);
       console.log(`${tags.username}: ${message}`);
       
-      speak(`${tags.username} says: ${message}`);
+      const filterMessage = (message) => {
+        let filteredMessage = message;
+        // Filter words
+        filteredWords.forEach(word => {
+          // Use word boundaries and case-insensitive matching
+          // Need to escape special regex characters in the user-provided word if necessary
+          // For simplicity, assuming words don't contain special regex chars for now
+          const regex = new RegExp(`\\b${word}\\b`, 'gi');
+          filteredMessage = filteredMessage.replace(regex, '***'); // Replace with asterisks
+        });
+
+        // Basic link detection and replacement
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        filteredMessage = filteredMessage.replace(urlRegex, '[link removed]');
+
+        return filteredMessage.trim(); // Trim whitespace potentially left after filtering
+      };
+
+      const filteredMessage = filterMessage(message);
+      // Only speak if the message is not empty after filtering
+      if (filteredMessage) {
+        speak(`${tags.username} says: ${filteredMessage}`);
+      }
     };
 
     const handleDisconnect = (error) => {
+      console.log('Disconnect event:', {
+        error,
+        errorType: typeof error,
+        errorDetails: error ? error.toString() : 'No error object',
+        connectionState: client ? client.readyState() : 'No client',
+        retryCount
+      });
+      
       setConnectionStatus('disconnected');
       setError(`Disconnected: ${error || 'Unknown error'}`);
       
       // Attempt to reconnect if not at max retries
       if (retryCount < MAX_RETRY_ATTEMPTS) {
+        console.log('Attempting reconnect...');
         connect();
       }
     };
@@ -145,39 +227,160 @@ const TwitchChat = () => {
     };
   }, [client, connect, retryCount, isTTSEnabled, speak]);
 
-  // Process message queue
+  // Initialize queue processor
   useEffect(() => {
-    processQueueRef.current = () => {
-      console.log('processQueueRef.current called', 'isProcessing:', isProcessing, 'messageQueue:', messageQueue);
-      if (!isProcessing && messageQueue && messageQueue.length > 0) {
-        console.log('processQueueRef.current: processing message:', messageQueue[0]);
+    const processQueue = () => {
+      // Get latest queue state
+      const currentQueue = messageQueue;
+      
+      console.log('Queue processor check:', {
+        isProcessing,
+        currentQueue,
+        queueLength: currentQueue?.length,
+        selectedVoice: selectedVoice?.name,
+        speechRate
+      });
+
+      if (isProcessing) {
+        console.log('Already processing a message, skipping...');
+        return;
+      }
+
+      if (!currentQueue || currentQueue.length === 0) {
+        console.log('Queue is empty, nothing to process');
+        return;
+      }
+
+      if (!selectedVoice) {
+        console.log('No voice selected, cannot process queue');
+        return;
+      }
+
+      const message = currentQueue[0];
+      console.log('Processing message:', message, 'Full queue:', currentQueue);
+
+      const utterance = new SpeechSynthesisUtterance(message);
+      utterance.voice = selectedVoice;
+      utterance.rate = speechRate;
+
+      // Set up event handlers before starting speech
+      utterance.onstart = () => {
+        console.log('Speech started:', message);
         setIsProcessing(true);
-        const message = messageQueue[0];
-        setMessageQueue(prevQueue => prevQueue.slice(1));
+      };
 
-        const utterance = new SpeechSynthesisUtterance(message);
-        utterance.voice = selectedVoice;
-        utterance.rate = speechRate;
-        utterance.onstart = () => {
-          console.log('utterance.onstart', 'message:', utterance.text);
-          setIsProcessing(true);
-        }
-        console.log('Calling speechSynthesis.current.speak with:', utterance.text);
-        speechSynthesis.current.speak(utterance);
-
-        utterance.onend = () => {
-          console.log('utterance.onend', 'message:', utterance.text);
-          setIsProcessing(false);
-          if (messageQueue.length > 0) {
+      utterance.onend = () => {
+        console.log('Speech ended:', message);
+        setIsProcessing(false);
+        // Remove the processed message
+        setMessageQueue(prevQueue => {
+          const newQueue = prevQueue.slice(1);
+          console.log('Message completed, new queue:', newQueue);
+          return newQueue;
+        });
+        // Process next message if queue not empty
+        setTimeout(() => {
+          console.log('Checking for next message...');
+          if (processQueueRef.current) {
             processQueueRef.current();
           }
-        };
+        }, 100);
+      };
+
+      utterance.onerror = (event) => {
+        console.error('Speech synthesis error:', event);
+        console.log('Error details:', {
+          message,
+          voice: selectedVoice.name,
+          rate: speechRate
+        });
+        setIsProcessing(false);
+        setMessageQueue(prevQueue => {
+          const newQueue = prevQueue.slice(1);
+          console.log('Error occurred, new queue:', newQueue);
+          return newQueue;
+        });
+        setTimeout(() => {
+          if (processQueueRef.current) {
+            processQueueRef.current();
+          }
+        }, 100);
+      };
+
+      // Start speaking
+      try {
+        console.log('Pre-speech check:', {
+          synthAvailable: !!speechSynthesis.current,
+          speaking: speechSynthesis.current?.speaking,
+          pending: speechSynthesis.current?.pending,
+          paused: speechSynthesis.current?.paused
+        });
+
+        if (!speechSynthesis.current) {
+          throw new Error('Speech synthesis not available');
+        }
+
+        // Resume if paused
+        if (speechSynthesis.current.paused) {
+          console.log('Resuming paused speech synthesis');
+          speechSynthesis.current.resume();
+        }
+
+        // Cancel any ongoing speech to prevent queue from getting stuck
+        speechSynthesis.current.cancel();
+
+        console.log('Attempting to speak:', message);
+        speechSynthesis.current.speak(utterance);
+      } catch (error) {
+        console.error('Failed to start speech:', error);
+        setIsProcessing(false);
+        setMessageQueue(prevQueue => {
+          const newQueue = prevQueue.slice(1);
+          console.log('Speech failed, new queue:', newQueue);
+          return newQueue;
+        });
+        setTimeout(() => {
+          if (processQueueRef.current) {
+            processQueueRef.current();
+          }
+        }, 100);
       }
     };
-    if (messageQueue.length > 0) {
+
+    processQueueRef.current = processQueue;
+
+    return () => {
+      console.log('Cleaning up queue processor');
+      processQueueRef.current = null;
+    };
+  }, [messageQueue, selectedVoice, speechRate, isProcessing]); // Include all required dependencies
+
+  // Watch queue and trigger processing
+  useEffect(() => {
+    const queueState = {
+      queueLength: messageQueue?.length || 0,
+      isProcessing,
+      hasProcessor: !!processQueueRef.current,
+      messages: messageQueue
+    };
+    
+    console.log('Queue state changed:', queueState);
+
+    // Only process if we have messages, aren't currently processing, and have a processor
+    if (queueState.queueLength > 0 && !queueState.isProcessing && queueState.hasProcessor) {
+      console.log('Conditions met for processing:', {
+        nextMessage: queueState.messages[0],
+        remainingMessages: queueState.messages.slice(1)
+      });
       processQueueRef.current();
+    } else {
+      console.log('Skipping queue processing because:', {
+        hasMessages: queueState.queueLength > 0,
+        notProcessing: !queueState.isProcessing,
+        hasProcessor: queueState.hasProcessor
+      });
     }
-  }, [messageQueue, selectedVoice, speechRate, isProcessing, messageQueue.length]);
+  }, [messageQueue, isProcessing]); // Watch full messageQueue object, not just length
 
   const reconnect = () => {
     setRetryCount(0);
@@ -226,6 +429,45 @@ const TwitchChat = () => {
             {speechRate.toFixed(1)}x
           </label>
         </div>
+
+        <div className="moderation-controls">
+          <h3>Moderation</h3>
+          <label>
+            Filtered Words:
+            <input
+              type="text"
+              id="newFilteredWord"
+            />
+            <button
+              onClick={() => {
+                const newWord = document.getElementById('newFilteredWord').value;
+                if (newWord && !filteredWords.includes(newWord)) {
+                  setFilteredWords([...filteredWords, newWord]);
+                  document.getElementById('newFilteredWord').value = '';
+                }
+              }}
+            >
+              Add Word
+            </button>
+          </label>
+          <ul>
+            {filteredWords.map((word, index) => (
+              <li key={index}>
+                {word}
+                <button
+                  onClick={() => {
+                    const newFilteredWords = [...filteredWords];
+                    newFilteredWords.splice(index, 1);
+                    setFilteredWords(newFilteredWords);
+                  }}
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div> {/* Close moderation-controls */}
+
         {error && (
           <div className="error-container">
             <span className="error-message">{error}</span>
@@ -236,7 +478,7 @@ const TwitchChat = () => {
             )}
           </div>
         )}
-      </div>
+      </div> {/* Close status-bar */}
       <div className="messages">
         {messages.map(msg => (
           <div key={msg.id} className="message">
